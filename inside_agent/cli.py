@@ -220,8 +220,10 @@ def main():
                 
                 # 执行Agent
                 console.print("[bold blue]Agent:[/bold blue] ", end="")
-                response = agent.run(user_input)
-                console.print(response)
+                # 使用流式输出
+                response = agent.run_stream(user_input)
+                # 禁用Rich标记解析，避免标记错误
+                console.print("", markup=False)
                 
             except KeyboardInterrupt:
                 console.print("\n[yellow]操作已取消[/yellow]")

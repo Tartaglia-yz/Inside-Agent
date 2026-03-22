@@ -49,6 +49,14 @@ class MiniMaxModel(BaseModel):
             # 组合所有内容
             full_content = "".join(content_parts)
             
+            # 检查是否包含工具调用标记
+            tool_calls = self._parse_tool_calls(full_content)
+            if tool_calls:
+                return {
+                    "content": full_content,
+                    "tool_calls": tool_calls
+                }
+            
             return {
                 "content": full_content
             }
@@ -110,6 +118,59 @@ class MiniMaxModel(BaseModel):
     def get_name(self) -> str:
         """获取模型名称"""
         return self.model
+    
+    def _parse_tool_calls(self, content: str) -> List[Dict[str, Any]]:
+        """解析模型生成的工具调用标记"""
+        import re
+        tool_calls = []
+        
+        # 解析 XML 格式的工具调用
+        xml_pattern = r'<tool_call>\s*name="([^"]+)"\s*(<parameter name="([^"]+)"[^>]*>([^<]+)</parameter>)?\s*</tool>'
+        xml_matches = re.findall(xml_pattern, content, re.DOTALL)
+        
+        for match in xml_matches:
+            tool_name = match[0]
+            param_name = match[2]
+            param_value = match[3]
+            
+            # 转换为标准工具调用格式
+            tool_call = {
+                "id": f"tool_{len(tool_calls)}",
+                "type": "function",
+                "function": {
+                    "name": "file_tool",  # 映射到我们的file_tool
+                    "arguments": {
+                        "action": "list" if tool_name == "list_directory" else "read",
+                        "directory": param_value if param_name == "path" else "."
+                    }
+                }
+            }
+            tool_calls.append(tool_call)
+        
+        # 解析 JSON 格式的工具调用
+        json_pattern = r'\[TOOL_CALL\]\s*\{tool => "([^"]+)", args => \{\s*--([^\s]+) "([^"]+)"\s*\}\}\s*\[/TOOL_CALL\]'
+        json_matches = re.findall(json_pattern, content, re.DOTALL)
+        
+        for match in json_matches:
+            tool_name = match[0]
+            param_name = match[1]
+            param_value = match[2]
+            
+            # 转换为标准工具调用格式
+            tool_call = {
+                "id": f"tool_{len(tool_calls)}",
+                "type": "function",
+                "function": {
+                    "name": "file_tool",  # 映射到我们的file_tool
+                    "arguments": {
+                        "action": "list" if tool_name == "list_directory" else "read",
+                        "directory": param_value if param_name == "path" else "."
+                    }
+                }
+            }
+            tool_calls.append(tool_call)
+        
+        return tool_calls
     
     def _convert_context(self, context: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """转换上下文格式以兼容Anthropic API"""

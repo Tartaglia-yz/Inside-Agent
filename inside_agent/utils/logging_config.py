@@ -34,6 +34,7 @@ class LoggingConfig:
         # 禁用某些第三方库的日志
         logging.getLogger("requests").setLevel(logging.WARNING)
         logging.getLogger("urllib3").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         
         logger = logging.getLogger(__name__)
         logger.info(f"日志配置完成，日志文件：{log_file}")
