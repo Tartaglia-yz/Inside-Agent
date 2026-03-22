@@ -1,0 +1,50 @@
+# Virtual environment
+venv/
+env/
+
+# Environment variables
+.env
+
+# Log files
+logs/
+*.log
+
+# Workspace directory (contains memory files)
+!workspace/  # 允许上传workspace目录及其所有内容
+!workspace/core-memory.md  # 允许上传core-memory.md文件
+workspace/memory/  # 不允许上传memory目录中的内容
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# Test files
+.pytest_cache/
+test/__pycache__/
+
+# Coverage files
+.coverage
+coverage.xml
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
