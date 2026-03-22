@@ -10,8 +10,6 @@ logs/
 *.log
 
 # Workspace directory (contains memory files)
-!workspace/  # 允许上传workspace目录及其所有内容
-!workspace/core-memory.md  # 允许上传core-memory.md文件
 workspace/memory/  # 不允许上传memory目录中的内容
 
 # Python bytecode
