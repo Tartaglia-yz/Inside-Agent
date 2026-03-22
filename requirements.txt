@@ -1,0 +1,9 @@
+# 核心依赖
+anthropic
+python-dotenv
+rich
+
+# 版本锁定（可选）
+# anthropic>=0.20.0
+# python-dotenv>=1.0.0
+# rich>=13.0.0

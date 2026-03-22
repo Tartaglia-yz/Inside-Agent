@@ -1,0 +1,22 @@
+{
+  "model": {
+    "model_name": "MiniMax-M2.7",
+    "base_url": "https://api.minimax.chat/v1/text/chatcompletion",
+    "anthropic_base_url": "https://api.minimaxi.com/anthropic",
+    "temperature": 0.7,
+    "max_tokens": 10240
+  },
+  "agent": {
+    "name": "Inside Agent",
+    "max_context_tokens": 200000,
+    "token_ratio": 0.7
+  },
+  "memory": {
+    "workspace_dir": "workspace",
+    "core_memory_file": "core-memory.md",
+    "memory_dir": "memory"
+  },
+  "logging": {
+    "log_level": "INFO"
+  }
+}

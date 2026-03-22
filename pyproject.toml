@@ -1,0 +1,24 @@
+[project]
+name = "inside-agent"
+version = "0.1.0"
+description = "A minimal Agent using MiniMax M2.7 model with Anthropic API compatibility"
+authors = [
+    { name = "Developer", email = "developer@example.com" }
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.31.0"
+pydantic = "^2.5.0"
+pydantic-settings = "^2.1.0"
+python-dotenv = "^1.0.0"
+rich = "^13.7.0"
+
+[tool.poetry.scripts]
+agent = "inside_agent.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
