@@ -3,6 +3,8 @@ import os
 import sys
 import json
 import datetime
+import threading
+import time
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
@@ -16,10 +18,40 @@ from .memory.file_memory import FileMemory
 from .utils.smart_context_manager import SmartContextManager
 from .utils.logging_config import LoggingConfig
 
-# 加载环境变量
 load_dotenv()
 
-# 读取配置文件
+SPINNER_CHARS = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+spinner_running = False
+spinner_thread = None
+
+def spinner_animation(stop_event, message="思考中"):
+    idx = 0
+    while not stop_event.is_set() and spinner_running:
+        char = SPINNER_CHARS[idx % len(SPINNER_CHARS)]
+        print(f"\r[cyan]{char}[/cyan] {message}", end="", flush=True)
+        idx += 1
+        time.sleep(0.1)
+    print("\r" + " " * 40 + "\r", end="", flush=True)
+
+def start_spinner(message="思考中"):
+    global spinner_running, spinner_thread
+    spinner_running = True
+    stop_event = threading.Event()
+    spinner_thread = threading.Thread(target=spinner_animation, args=(stop_event, message))
+    spinner_thread.daemon = True
+    spinner_thread.start()
+    return stop_event
+
+def stop_spinner(stop_event):
+    global spinner_running
+    spinner_running = False
+    if stop_event:
+        stop_event.set()
+    if spinner_thread:
+        spinner_thread.join(timeout=0.5)
+
+console = Console()
+
 def load_config():
     config_file = "agent.json"
     if os.path.exists(config_file):
@@ -127,6 +159,12 @@ def main():
     
     # 初始化组件
     try:
+        # 初始化工具
+        tools = [
+            FileTool(),
+            ShellTool()
+        ]
+
         # 初始化模型
         base_model = MiniMaxModel(
             api_key=api_key, 
@@ -135,13 +173,7 @@ def main():
             temperature=config["model"]["temperature"],
             max_tokens=config["model"]["max_tokens"]
         )
-        model = InterleavedThinkingModel(base_model=base_model)
-        
-        # 初始化工具
-        tools = [
-            FileTool(),
-            ShellTool()
-        ]
+        model = InterleavedThinkingModel(base_model=base_model, tools=tools)
         
         # 初始化记忆
         memory = FileMemory(workspace_dir=config["memory"]["workspace_dir"])
@@ -219,16 +251,20 @@ def main():
                     continue
                 
                 # 执行Agent
-                console.print("[bold blue]Agent:[/bold blue] ", end="")
-                # 使用流式输出
-                response = agent.run_stream(user_input)
-                # 禁用Rich标记解析，避免标记错误
+                console.print("[bold blue]Agent:[/bold blue] ", end="", markup=False)
+                stop_event = start_spinner("思考中")
+                try:
+                    response = agent.run_stream(user_input)
+                finally:
+                    stop_spinner(stop_event)
                 console.print("", markup=False)
                 
             except KeyboardInterrupt:
+                stop_spinner(None)
                 console.print("\n[yellow]操作已取消[/yellow]")
                 continue
             except Exception as e:
+                stop_spinner(None)
                 console.print(f"[red]错误: {str(e)}[/red]")
                 continue
                 

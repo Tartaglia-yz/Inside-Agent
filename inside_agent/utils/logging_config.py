@@ -24,8 +24,6 @@ class LoggingConfig:
             level=level,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[
-                # 控制台日志
-                logging.StreamHandler(),
                 # 文件日志
                 logging.FileHandler(log_file, encoding="utf-8")
             ]

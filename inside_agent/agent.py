@@ -6,8 +6,8 @@ from .memory.base import BaseMemory
 from .utils.context_manager import ContextManager
 
 class Agent:
-    """核心Agent类，实现完整的执行循环"""
-    
+    """核心Agent类，实现完整的ReAct执行循环"""
+
     def __init__(
         self,
         model: BaseModel,
@@ -22,126 +22,72 @@ class Agent:
         self.context_manager = context_manager
         self.name = name
         self.logger = logging.getLogger(__name__)
-    
+
+        if hasattr(self.model, 'tools'):
+            self.model.tools = tools
+
     def run(self, user_input: str) -> str:
-        """执行Agent的完整循环"""
+        """执行Agent的ReAct完整循环"""
         try:
-            # 1. 处理用户输入，添加到上下文
             self.context_manager.add_message("user", user_input)
-            
-            # 2. 获取历史上下文
             context = self.context_manager.get_context()
-            
-            # 3. 调用模型获取响应
-            response = self.model.generate(context)
-            
-            # 4. 处理模型响应
-            if "tool_calls" in response:
-                # 处理工具调用
-                tool_results = self._execute_tools(response["tool_calls"])
-                
-                # 将工具结果添加到上下文
-                for tool_result in tool_results:
-                    self.context_manager.add_message("tool", tool_result)
-                
-                # 再次调用模型获取最终响应
-                context = self.context_manager.get_context()
-                final_response = self.model.generate(context)
-                
-                # 添加最终响应到上下文
-                self.context_manager.add_message("assistant", final_response["content"])
-                
-                # 保存到记忆
-                self.memory.save_conversation(self.context_manager.get_full_history())
-                
-                return final_response["content"]
+
+            if hasattr(self.model, 'run_with_react'):
+                response = self.model.run_with_react(context, user_input)
+            elif hasattr(self.model, 'generate'):
+                response = self.model.generate(context)
+                response = response.get("content", response) if isinstance(response, dict) else response
             else:
-                # 直接返回模型响应
-                self.context_manager.add_message("assistant", response["content"])
-                
-                # 保存到记忆
-                self.memory.save_conversation(self.context_manager.get_full_history())
-                
-                return response["content"]
-        
+                return "模型不支持generate或run_with_react方法"
+
+            self.context_manager.add_message("assistant", str(response))
+            self.memory.save_conversation(self.context_manager.get_full_history())
+
+            return str(response)
+
         except Exception as e:
             self.logger.error(f"Agent执行出错: {str(e)}")
             return f"执行出错: {str(e)}"
-    
+
     def run_stream(self, user_input: str) -> str:
-        """执行Agent的完整循环，使用流式输出"""
+        """执行Agent的ReAct完整循环，使用流式输出"""
         try:
-            # 1. 处理用户输入，添加到上下文
             self.context_manager.add_message("user", user_input)
-            
-            # 2. 获取历史上下文
             context = self.context_manager.get_context()
-            
-            # 3. 调用模型获取响应
-            response = self.model.generate(context)
-            
-            # 4. 处理模型响应
-            if "tool_calls" in response:
-                # 处理工具调用
-                tool_results = self._execute_tools(response["tool_calls"])
-                
-                # 将工具结果添加到上下文
-                for tool_result in tool_results:
-                    self.context_manager.add_message("tool", tool_result)
-                
-                # 再次调用模型获取最终响应（流式）
-                context = self.context_manager.get_context()
-                if hasattr(self.model, "generate_stream"):
-                    # 使用流式输出
-                    final_response = self.model.generate_stream(context)
-                else:
-                    # 回退到普通输出
-                    final_response = self.model.generate(context)
-                    final_response = final_response["content"]
-                    print(final_response)
-                
-                # 添加最终响应到上下文
-                self.context_manager.add_message("assistant", final_response)
-                
-                # 保存到记忆
-                self.memory.save_conversation(self.context_manager.get_full_history())
-                
-                return final_response
+
+            if hasattr(self.model, 'run_with_react'):
+                response = self.model.run_with_react(context, user_input)
+                print(response)
+            elif hasattr(self.model, 'generate_stream'):
+                response = self.model.generate_stream(context)
+            elif hasattr(self.model, 'generate'):
+                response = self.model.generate(context)
+                response = response.get("content", response) if isinstance(response, dict) else response
+                print(response)
             else:
-                # 直接使用流式输出
-                if hasattr(self.model, "generate_stream"):
-                    # 使用流式输出
-                    response_content = self.model.generate_stream(context)
-                else:
-                    # 回退到普通输出
-                    response_content = response["content"]
-                    print(response_content)
-                
-                # 添加响应到上下文
-                self.context_manager.add_message("assistant", response_content)
-                
-                # 保存到记忆
-                self.memory.save_conversation(self.context_manager.get_full_history())
-                
-                return response_content
-        
+                return "模型不支持generate或run_with_react方法"
+
+            self.context_manager.add_message("assistant", str(response))
+            self.memory.save_conversation(self.context_manager.get_full_history())
+
+            return str(response)
+
         except Exception as e:
             self.logger.error(f"Agent执行出错: {str(e)}")
             error_msg = f"执行出错: {str(e)}"
             print(error_msg)
             return error_msg
-    
+
     def _execute_tools(self, tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """执行工具调用"""
         results = []
-        
+
         for tool_call in tool_calls:
             tool_name = tool_call["function"]["name"]
             tool_args = tool_call["function"]["arguments"]
-            
-            # 查找对应的工具
+
             tool = next((t for t in self.tools if t.name == tool_name), None)
-            
+
             if tool:
                 try:
                     result = tool.execute(tool_args)
@@ -163,5 +109,5 @@ class Agent:
                     "tool_name": tool_name,
                     "result": f"工具未找到: {tool_name}"
                 })
-        
+
         return results
