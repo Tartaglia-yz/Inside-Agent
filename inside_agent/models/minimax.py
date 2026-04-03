@@ -188,6 +188,18 @@ class MiniMaxModel(BaseModel):
             if tool_call:
                 tool_calls.append(tool_call)
 
+        unbracketed_pattern = r'\{tool\s*=>\s*"([^"]+)",\s*args\s*=>\s*\{\s*--([^\s]+)\s+"([^"]+)"[^}]*\}\}'
+        unbracketed_matches = re.findall(unbracketed_pattern, content, re.IGNORECASE | re.DOTALL)
+
+        for match in unbracketed_matches:
+            tool_name = match[0]
+            param_name = match[1]
+            param_value = match[2]
+
+            tool_call = self._create_tool_call(tool_name, param_name, param_value)
+            if tool_call:
+                tool_calls.append(tool_call)
+
         simple_pattern = r'(?:tool_call|execute|run|call)\s*:\s*(\w+)[\s\(]+([^)]+)?'
         simple_matches = re.findall(simple_pattern, content, re.IGNORECASE)
 
@@ -203,7 +215,8 @@ class MiniMaxModel(BaseModel):
 
     def _create_tool_call(self, tool_name: str, param_name: str, param_value: str) -> Optional[Dict[str, Any]]:
         """根据工具名称创建标准化的工具调用"""
-        if "shell" in tool_name.lower() or "command" in tool_name.lower() or "execute" in tool_name.lower() or "run" in tool_name.lower():
+        tool_name_lower = tool_name.lower()
+        if "shell" in tool_name_lower or "bash" in tool_name_lower or "command" in tool_name_lower or "execute" in tool_name_lower or "run" in tool_name_lower:
             return {
                 "id": f"tool_{id(self)}",
                 "type": "function",
@@ -214,8 +227,8 @@ class MiniMaxModel(BaseModel):
                     }
                 }
             }
-        elif "file" in tool_name.lower() or "read" in tool_name.lower() or "write" in tool_name.lower() or "list" in tool_name.lower():
-            action = "read" if "read" in tool_name.lower() else ("list" if "list" in tool_name.lower() else "read")
+        elif "file" in tool_name_lower or "read" in tool_name_lower or "write" in tool_name_lower or "list" in tool_name_lower:
+            action = "read" if "read" in tool_name_lower else ("list" if "list" in tool_name_lower else "read")
             return {
                 "id": f"tool_{id(self)}",
                 "type": "function",
@@ -227,8 +240,8 @@ class MiniMaxModel(BaseModel):
                     }
                 }
             }
-        elif tool_name in ["file_tool", "shell_tool"]:
-            if tool_name == "shell_tool":
+        elif tool_name in ["file_tool", "shell_tool", "Bash", "bash"]:
+            if tool_name in ["shell_tool", "Bash", "bash"]:
                 return {
                     "id": f"tool_{id(self)}",
                     "type": "function",
@@ -255,7 +268,12 @@ class MiniMaxModel(BaseModel):
         return None
     
     def _convert_context(self, context: List[Dict[str, Any]], tools: List[Any] = None) -> List[Dict[str, Any]]:
-        """转换上下文格式以兼容Anthropic API"""
+        """转换上下文格式以兼容Anthropic API
+
+        注意：不再自动添加OS信息和工具说明
+        - OS信息由InterleavedThinkingModel在需要时动态注入
+        - 工具说明在检测到工具调用需求时动态注入
+        """
         converted = []
 
         system_message = None
@@ -273,55 +291,7 @@ class MiniMaxModel(BaseModel):
             elif role == "assistant":
                 assistant_messages.append(content)
 
-        os_info_str = f"""
-
-## 当前运行环境
-- 操作系统类型：{self.os_info['os_type'].upper()}
-- 默认Shell：{self.os_info['shell']}
-- 路径分隔符：{self.os_info['path_separator']}
-
-**重要提示：**
-- 请根据上述操作系统类型生成相应的命令
-- Windows 系统使用 PowerShell 或 cmd 命令（如 dir, cd, type 等）
-- macOS/Linux 系统使用 Bash 命令（如 ls, cd, cat 等）
-- 路径格式：Windows 使用反斜杠 \\，Unix 系统使用正斜杠 /
-- 当前工作目录命令：{self.os_info['current_dir']}
-- 列出目录命令：{self.os_info['list_dir']}
-"""
-
-        tools_info = ""
-        if tools:
-            tools_info = """
-## 可用工具
-你可以通过生成特殊标记来调用工具。支持的工具：
-
-### file_tool
-用于文件操作：
-- read: 读取文件内容
-- write: 写入文件内容
-- list: 列出目录内容
-
-参数：action (操作类型), file_path (文件路径), content (文件内容), directory (目录路径)
-
-### shell_tool
-用于执行系统命令：
-- 执行Shell命令获取系统信息
-- 执行各种终端命令
-
-参数：command (要执行的命令字符串)
-
-**重要：当你需要执行命令时，请使用shell_tool并提供完整的命令字符串。**
-**请确保命令符合当前操作系统环境！**
-
-调用格式示例：
-<tool_call>name="shell_tool"<parameter name="command">""" + self.os_info['list_dir'] + """</parameter></tool_call>
-"""
-
         if system_message:
-            if tools_info and tools_info not in system_message:
-                system_message = system_message + os_info_str + tools_info
-            elif os_info_str not in system_message:
-                system_message = system_message + os_info_str
             converted.append({
                 "role": "system",
                 "content": system_message
@@ -329,7 +299,7 @@ class MiniMaxModel(BaseModel):
         else:
             converted.append({
                 "role": "system",
-                "content": "你是 Inside Agent，一个智能助手。" + os_info_str + tools_info
+                "content": "你是 Inside Agent，一个智能助手。"
             })
 
         recent_messages = []
@@ -342,10 +312,9 @@ class MiniMaxModel(BaseModel):
                     "text": assistant_messages[-1]
                 }]
             })
-        
-        # 添加最近的用户消息（如果有）
+
         for i, msg in enumerate(reversed(user_messages)):
-            if i < 2:  # 只保留最近2条
+            if i < 2:
                 recent_messages.insert(0, {
                     "role": "user",
                     "content": [{
@@ -353,11 +322,9 @@ class MiniMaxModel(BaseModel):
                         "text": msg
                     }]
                 })
-        
-        # 将最近的消息添加到转换后的上下文中
+
         converted.extend(recent_messages)
-        
-        # 如果没有用户消息，添加一个默认消息
+
         if not user_messages:
             converted.append({
                 "role": "user",
@@ -366,7 +333,7 @@ class MiniMaxModel(BaseModel):
                     "text": "Hello"
                 }]
             })
-        
+
         return converted
     
 

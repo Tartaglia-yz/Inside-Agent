@@ -24,20 +24,24 @@ SPINNER_CHARS = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', 
 spinner_running = False
 spinner_thread = None
 
-def spinner_animation(stop_event, message="思考中"):
+def spinner_animation(stop_event, prefix=""):
     idx = 0
+    prefix_plain = "Agent: "
     while not stop_event.is_set() and spinner_running:
         char = SPINNER_CHARS[idx % len(SPINNER_CHARS)]
-        print(f"\r[cyan]{char}[/cyan] {message}", end="", flush=True)
+        spinner_text = f"{prefix_plain}{char} "
+        sys.stdout.write(f"\r{spinner_text}")
+        sys.stdout.flush()
         idx += 1
         time.sleep(0.1)
-    print("\r" + " " * 40 + "\r", end="", flush=True)
+    sys.stdout.write("\r" + " " * len(spinner_text) + "\r")
+    sys.stdout.flush()
 
-def start_spinner(message="思考中"):
+def start_spinner(prefix=""):
     global spinner_running, spinner_thread
     spinner_running = True
     stop_event = threading.Event()
-    spinner_thread = threading.Thread(target=spinner_animation, args=(stop_event, message))
+    spinner_thread = threading.Thread(target=spinner_animation, args=(stop_event, prefix))
     spinner_thread.daemon = True
     spinner_thread.start()
     return stop_event
@@ -48,7 +52,7 @@ def stop_spinner(stop_event):
     if stop_event:
         stop_event.set()
     if spinner_thread:
-        spinner_thread.join(timeout=0.5)
+        spinner_thread.join(timeout=0.3)
 
 console = Console()
 
@@ -251,13 +255,12 @@ def main():
                     continue
                 
                 # 执行Agent
-                console.print("[bold blue]Agent:[/bold blue] ", end="", markup=False)
-                stop_event = start_spinner("思考中")
+                stop_event = start_spinner("Agent: ")
                 try:
                     response = agent.run_stream(user_input)
                 finally:
                     stop_spinner(stop_event)
-                console.print("", markup=False)
+                console.print(f"[bold blue]Agent:[/bold blue] {response}", markup=False)
                 
             except KeyboardInterrupt:
                 stop_spinner(None)

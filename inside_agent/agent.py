@@ -33,7 +33,7 @@ class Agent:
             context = self.context_manager.get_context()
 
             if hasattr(self.model, 'run_with_react'):
-                response = self.model.run_with_react(context, user_input)
+                response = self.model.run_with_react(context)
             elif hasattr(self.model, 'generate'):
                 response = self.model.generate(context)
                 response = response.get("content", response) if isinstance(response, dict) else response
@@ -56,7 +56,7 @@ class Agent:
             context = self.context_manager.get_context()
 
             if hasattr(self.model, 'run_with_react'):
-                response = self.model.run_with_react(context, user_input)
+                response = self.model.run_with_react(context)
                 print(response)
             elif hasattr(self.model, 'generate_stream'):
                 response = self.model.generate_stream(context)
