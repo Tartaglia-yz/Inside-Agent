@@ -11,6 +11,7 @@ logs/
 
 # Workspace directory (contains memory files)
 workspace/memory/**  # 不允许上传memory目录中的任何内容
+workspace/memory/*.md
 
 # Python bytecode
 __pycache__/
@@ -46,6 +47,4 @@ coverage.xml
 *.temp
 .tmp/
 .temp/
-workspace/memory/2026-03-23-memory.md
-workspace/memory/2026-04-02-memory.md
-workspace/memory/2026-04-03-memory.md
+
