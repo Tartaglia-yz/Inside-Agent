@@ -64,31 +64,70 @@ class MiniMaxModel(BaseModel):
         try:
             messages = self._convert_context(context, self.tools)
             
-            # 使用Anthropic SDK调用模型
+            # 获取工具定义
+            tools = self._get_tools_definition()
+            
+            # 使用Anthropic SDK调用模型，启用Function Calling
             response = self.client.messages.create(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                tools=tools if tools else None,
                 stream=False
             )
             
             # 处理响应
             content_parts = []
+            tool_results = []
             
             # 遍历响应内容
-            for block in response.content:
-                if block.type == "thinking":
-                    # 包含思考过程
-                    content_parts.append(f"\n[思考]\n{block.thinking}\n")
-                elif block.type == "text":
-                    # 包含文本内容
-                    content_parts.append(block.text)
+            if not response.content:
+                full_content = ""
+            else:
+                for block in response.content:
+                    if block.type == "thinking":
+                        # 包含思考过程
+                        content_parts.append(f"\n[思考]\n{block.thinking}\n")
+                    elif block.type == "text":
+                        # 包含文本内容
+                        content_parts.append(block.text)
+                    elif block.type == "tool_use":
+                        # 处理工具调用
+                        tool_results.append({
+                            "name": block.name,
+                            "input": block.input,
+                            "id": block.id
+                        })
+                
+                # 组合所有内容
+                full_content = "".join(content_parts)
             
-            # 组合所有内容
-            full_content = "".join(content_parts)
+            # 优先处理原生的工具调用结果
+            if tool_results:
+                standardized_tool_calls = []
+                for result in tool_results:
+                    tool_name = result["name"]
+                    tool_input = result["input"] or {}
+                    
+                    # 标准化工具调用格式
+                    if tool_name in ["shell_tool", "bash", "execute", "command"]:
+                        standardized_tool_calls.append({
+                            "id": result["id"],
+                            "type": "function",
+                            "function": {
+                                "name": "shell_tool",
+                                "arguments": tool_input
+                            }
+                        })
+                
+                if standardized_tool_calls:
+                    return {
+                        "content": full_content,
+                        "tool_calls": standardized_tool_calls
+                    }
             
-            # 检查是否包含工具调用标记
+            # 检查是否包含工具调用标记（备用方案）
             tool_calls = self._parse_tool_calls(full_content)
             if tool_calls:
                 return {
@@ -176,29 +215,45 @@ class MiniMaxModel(BaseModel):
             if tool_call:
                 tool_calls.append(tool_call)
 
-        json_pattern = r'\[TOOL_CALL\]\s*\{tool => "([^"]+)", args => \{\s*--([^\s]+) "([^"]+)"\s*\}\}\s*\[/TOOL_CALL\]'
+        # 匹配包含多个参数的TOOL_CALL格式（支持单引号和双引号）
+        json_pattern = r'\[TOOL_CALL\]\s*\{tool =>\s*["\']([^"\']+)["\'],\s*args =>\s*\{(.*?)\}\}\s*\[/TOOL_CALL\]'
         json_matches = re.findall(json_pattern, content, re.DOTALL)
 
         for match in json_matches:
             tool_name = match[0]
-            param_name = match[1]
-            param_value = match[2]
+            args_str = match[1]
+            # 提取所有参数
+            params = {}
+            param_pattern = r'--([^\s]+)\s+["\']([^"\']+)["\']'
+            param_matches = re.findall(param_pattern, args_str)
+            for param_match in param_matches:
+                params[param_match[0]] = param_match[1]
+            # 优先使用command参数，也支持cmd参数
+            command = params.get('command') or params.get('cmd')
+            if command:
+                tool_call = self._create_tool_call(tool_name, 'command', command)
+                if tool_call:
+                    tool_calls.append(tool_call)
 
-            tool_call = self._create_tool_call(tool_name, param_name, param_value)
-            if tool_call:
-                tool_calls.append(tool_call)
-
-        unbracketed_pattern = r'\{tool\s*=>\s*"([^"]+)",\s*args\s*=>\s*\{\s*--([^\s]+)\s+"([^"]+)"[^}]*\}\}'
+        # 匹配无括号的工具调用格式（支持单引号和双引号）
+        unbracketed_pattern = r'\{tool\s*=>\s*["\']([^"\']+)["\'],\s*args\s*=>\s*\{(.*?)\}\}'
         unbracketed_matches = re.findall(unbracketed_pattern, content, re.IGNORECASE | re.DOTALL)
 
         for match in unbracketed_matches:
             tool_name = match[0]
-            param_name = match[1]
-            param_value = match[2]
-
-            tool_call = self._create_tool_call(tool_name, param_name, param_value)
-            if tool_call:
-                tool_calls.append(tool_call)
+            args_str = match[1]
+            # 提取所有参数
+            params = {}
+            param_pattern = r'--([^\s]+)\s+["\']([^"\']+)["\']'
+            param_matches = re.findall(param_pattern, args_str)
+            for param_match in param_matches:
+                params[param_match[0]] = param_match[1]
+            # 优先使用command参数，也支持cmd参数
+            command = params.get('command') or params.get('cmd')
+            if command:
+                tool_call = self._create_tool_call(tool_name, 'command', command)
+                if tool_call:
+                    tool_calls.append(tool_call)
 
         simple_pattern = r'(?:tool_call|execute|run|call)\s*:\s*(\w+)[\s\(]+([^)]+)?'
         simple_matches = re.findall(simple_pattern, content, re.IGNORECASE)
@@ -211,7 +266,120 @@ class MiniMaxModel(BaseModel):
             if tool_call:
                 tool_calls.append(tool_call)
 
+        # 解析 bash 代码块格式
+        bash_pattern = r'```bash\s*([^`]+)\s*```'
+        bash_matches = re.findall(bash_pattern, content, re.DOTALL)
+
+        for match in bash_matches:
+            command = match.strip()
+            if command:
+                tool_call = {
+                    "id": f"tool_{id(self)}",
+                    "type": "function",
+                    "function": {
+                        "name": "shell_tool",
+                        "arguments": {
+                            "command": command
+                        }
+                    }
+                }
+                tool_calls.append(tool_call)
+
+        # 解析 shell 代码块格式
+        shell_pattern = r'```shell\s*([^`]+)\s*```'
+        shell_matches = re.findall(shell_pattern, content, re.DOTALL)
+
+        for match in shell_matches:
+            command = match.strip()
+            if command:
+                tool_call = {
+                    "id": f"tool_{id(self)}",
+                    "type": "function",
+                    "function": {
+                        "name": "shell_tool",
+                        "arguments": {
+                            "command": command
+                        }
+                    }
+                }
+                tool_calls.append(tool_call)
+
+        # 解析 [命令] 格式
+        command_pattern = r'\[命令\]\s*\n*```[\w]*\s*\n*([^`]+)\s*```'
+        command_matches = re.findall(command_pattern, content, re.DOTALL)
+
+        for match in command_matches:
+            command = match.strip()
+            if command:
+                tool_call = {
+                    "id": f"tool_{id(self)}",
+                    "type": "function",
+                    "function": {
+                        "name": "shell_tool",
+                        "arguments": {
+                            "command": command
+                        }
+                    }
+                }
+                tool_calls.append(tool_call)
+
         return tool_calls
+
+    def _get_tools_definition(self) -> List[Dict[str, Any]]:
+        """获取工具定义，用于Function Calling"""
+        # 获取当前操作系统信息
+        os_type = self.os_info.get('os_type', 'unknown') if self.os_info else 'unknown'
+        
+        # 根据操作系统生成相应的命令示例
+        if os_type == 'windows':
+            command_examples = "Windows 命令示例：\\n- 查看系统时间：time /t\\n- 列出目录：dir\\n- 查看文件：type filename.txt\\n- 创建目录：mkdir directory\\n- 删除文件：del filename.txt\\n- 查看当前目录：cd"
+        else:
+            command_examples = "Linux/macOS 命令示例：\\n- 查看系统时间：date\\n- 列出目录：ls -la\\n- 查看文件：cat filename.txt\\n- 创建目录：mkdir -p directory\\n- 删除文件：rm filename.txt\\n- 查看当前目录：pwd"
+        
+        return [
+            {
+                "name": "shell_tool",
+                "description": f"执行系统命令的工具。**当前系统：{os_type.upper()}**\\n\\n{command_examples}\\n\\n**重要：必须根据当前操作系统类型使用相应的命令格式！**",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "要执行的系统命令字符串"
+                        }
+                    },
+                    "required": ["command"]
+                }
+            },
+            {
+                "name": "file_tool",
+                "description": f"""执行文件操作。
+当前系统：{os_type.upper()}
+
+当需要列出目录内容时，**必须使用 shell_tool 执行 "dir" 命令**（Windows）或 "ls" 命令（Linux/macOS），不要使用 file_tool。
+当需要读取文件时使用 action="read"。
+当需要写入文件时使用 action="write"。""",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["read", "write"],
+                            "description": "操作类型：read(读取文件), write(写入文件)"
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": "文件路径"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "文件内容（用于写入操作）"
+                        }
+                    },
+                    "required": ["action", "file_path"]
+                }
+            }
+        ]
 
     def _create_tool_call(self, tool_name: str, param_name: str, param_value: str) -> Optional[Dict[str, Any]]:
         """根据工具名称创建标准化的工具调用"""

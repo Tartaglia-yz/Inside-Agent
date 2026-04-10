@@ -22,8 +22,48 @@ class SmartContextManager:
         self._manage_context()
     
     def get_context(self) -> List[Dict[str, Any]]:
-        """获取当前上下文"""
-        return self.conversation_history
+        """获取当前上下文，只保留最近的相关消息，并添加消息类型标注"""
+        # 保留系统消息
+        system_messages = [msg for msg in self.conversation_history if msg["role"] == "system"]
+        
+        # 只保留最近的几条消息（最近的5条非系统消息）
+        recent_messages = []
+        message_count = 0
+        
+        # 从最近的消息开始往前找
+        for msg in reversed(self.conversation_history):
+            if msg["role"] != "system":
+                recent_messages.insert(0, msg)
+                message_count += 1
+                # 只保留最近的5条非系统消息
+                if message_count >= 5:
+                    break
+        
+        # 对所有消息添加标注，明确区分历史对话和当前问题
+        annotated_messages = []
+        for i, msg in enumerate(recent_messages):
+            if len(recent_messages) == 1:
+                # 只有一条消息，标记为当前问题
+                if msg["role"] == "user":
+                    annotated_content = f"[当前问题]\n{msg['content']}"
+                else:
+                    annotated_content = f"[历史对话]\n{msg['content']}"
+            else:
+                # 多条消息，最后一条用户消息标记为当前问题，其他标记为历史对话
+                if i == len(recent_messages) - 1 and msg["role"] == "user":
+                    annotated_content = f"[当前问题]\n{msg['content']}"
+                else:
+                    annotated_content = f"[历史对话]\n{msg['content']}"
+            
+            annotated_messages.append({
+                "role": msg["role"],
+                "content": annotated_content
+            })
+        
+        # 组合系统消息和标注后的消息
+        context = system_messages + annotated_messages
+        self.logger.info(f"返回上下文: {len(system_messages)} 条系统消息, {len(annotated_messages)} 条最近消息")
+        return context
     
     def get_full_history(self) -> List[Dict[str, Any]]:
         """获取完整的对话历史"""

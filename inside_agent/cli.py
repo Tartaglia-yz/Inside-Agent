@@ -177,7 +177,8 @@ def main():
             temperature=config["model"]["temperature"],
             max_tokens=config["model"]["max_tokens"]
         )
-        model = InterleavedThinkingModel(base_model=base_model, tools=tools)
+        # 传递 os_info 确保系统信息正确传递
+        model = InterleavedThinkingModel(base_model=base_model, tools=tools, os_info=base_model.os_info)
         
         # 初始化记忆
         memory = FileMemory(workspace_dir=config["memory"]["workspace_dir"])
